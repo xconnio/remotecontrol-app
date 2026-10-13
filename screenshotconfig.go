@@ -1,11 +1,7 @@
 package remotecontrol
 
 import (
-	"os"
-	"path/filepath"
-
 	"github.com/godbus/dbus/v5"
-	"gopkg.in/yaml.v3"
 
 	"github.com/xconnio/deskconn/common"
 )
@@ -22,26 +18,7 @@ func DisableScreenshot(cfgDirectory string) error {
 }
 
 func updateScreenshotConfig(cfgDirectory string, enabled bool) error {
-	cfgPath := filepath.Join(cfgDirectory, "config.yml")
-
-	var config common.Config
-	data, err := os.ReadFile(cfgPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return err
-	}
-
-	config.Screenshot.Enabled = enabled
-
-	b, err := yaml.Marshal(config)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(cfgPath, b, 0600)
+	return setConfigSection(cfgDirectory, "screenshot", common.ScreenshotConfig{Enabled: enabled})
 }
 
 // RevokeScreenshotPermission clears the screenshot entry from the portal

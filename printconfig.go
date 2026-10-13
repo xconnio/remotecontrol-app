@@ -78,23 +78,5 @@ func updatePrintingConfig(mode common.PrintMode) error {
 	if err != nil {
 		return err
 	}
-	cfgPath := filepath.Join(cfgDirectory, "config.yml")
-
-	var config common.Config
-	data, err := os.ReadFile(cfgPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err == nil {
-		if err := yaml.Unmarshal(data, &config); err != nil {
-			return err
-		}
-	}
-
-	config.Printing.Mode = mode
-	b, err := yaml.Marshal(config)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(cfgPath, b, 0600)
+	return setConfigSection(cfgDirectory, "printing", common.PrintingConfig{Mode: mode})
 }
