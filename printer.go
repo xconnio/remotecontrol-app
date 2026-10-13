@@ -13,7 +13,6 @@ import (
 	"github.com/phin1x/go-ipp"
 
 	"github.com/xconnio/deskconn/common"
-	"github.com/xconnio/xconn-go"
 )
 
 type Printer struct {
@@ -29,66 +28,54 @@ func NewPrinter() *Printer {
 	}
 }
 
-func (p *Printer) handleListPrinters(ctx context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+func (p *Printer) listPrinters(ctx context.Context, _ []byte) (any, error) {
 	mode, err := p.currentPrintMode()
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return nil, err
 	}
 	if mode != common.PrintModeHost {
-		return xconn.NewInvocationError(common.ErrOperationFailed,
-			"printer hosting disabled; run `desk print enable --host-printers` to enable")
+		return nil, errors.New("printer hosting disabled; run `desk print enable --host-printers` to enable")
 	}
 
 	infos, err := p.cups.PrintersInfo(ctx)
 	if err != nil {
-		return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
+		return nil, err
 	}
-
-	result := make([]map[string]any, len(infos))
-	for i, info := range infos {
-		result[i] = map[string]any{"name": info.Name, "ppd": info.PPDModel}
-	}
-
-	return xconn.NewInvocationResult(result)
+	return infos, nil
 }
 
-func (p *Printer) handlePrint() xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		mode, err := p.currentPrintMode()
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-		if mode == common.PrintModeDisabled {
-			return xconn.NewInvocationError(common.ErrOperationFailed,
-				"printing disabled; run `desk print enable` to enable")
-		}
+// printRequest is ProcedurePrinterPrint's request; Data is base64 in JSON.
+type printRequest struct {
+	Printer  string `json:"printer"`
+	Filename string `json:"filename"`
+	Data     []byte `json:"data"`
+}
 
-		printer, err := inv.ArgString(0)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "invalid or missing printer name")
-		}
-		filename, err := inv.ArgString(1)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "invalid or missing file name")
-		}
-		data, err := inv.ArgBytes(2)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "invalid or missing print data")
-		}
-
-		jobID := fmt.Sprintf("%s-%d", printer, time.Now().UnixNano())
-		if strings.TrimSpace(printer) == "" {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "empty printer name")
-		}
-		if len(data) == 0 {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "empty print payload")
-		}
-
-		if err := p.ExecutePrint(ctx, printer, filename, data); err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult(jobID)
+func (p *Printer) print(ctx context.Context, req []byte) (any, error) {
+	mode, err := p.currentPrintMode()
+	if err != nil {
+		return nil, err
 	}
+	if mode == common.PrintModeDisabled {
+		return nil, errors.New("printing disabled; run `desk print enable` to enable")
+	}
+
+	var args printRequest
+	if err := decodeRequest(req, &args); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(args.Printer) == "" {
+		return nil, invalidArgumentError{errors.New("empty printer name")}
+	}
+	if len(args.Data) == 0 {
+		return nil, invalidArgumentError{errors.New("empty print payload")}
+	}
+
+	jobID := fmt.Sprintf("%s-%d", args.Printer, time.Now().UnixNano())
+	if err := p.ExecutePrint(ctx, args.Printer, args.Filename, args.Data); err != nil {
+		return nil, err
+	}
+	return jobID, nil
 }
 
 func (p *Printer) currentPrintMode() (common.PrintMode, error) {
