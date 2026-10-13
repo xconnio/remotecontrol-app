@@ -4,9 +4,12 @@ Remote control for a [Deskconn](https://github.com/xconnio/deskconn) machine: sc
 screenshots, media players (MPRIS), audio mute and printing.
 
 It runs next to `deskconnd` on the machine and registers its procedures on deskconnd's local socket
-(`~/.deskconn/deskconn.sock`). deskconnd's xlink forwards remote clients' calls to them, so the web and mobile apps
-reach them under the same procedure names as before. If deskconnd isn't up yet, or restarts, the app keeps
-retrying the connection.
+(`~/.deskconn/deskconn.sock`). If deskconnd isn't up yet, or restarts, the app keeps retrying the connection.
+
+Calls are end-to-end encrypted, by this app itself. It serves its own key exchange,
+`io.xconn.deskconn.deskconnd.remotecontrol.key.exchange`, the same X25519 exchange as deskconnd's `key.exchange`
+but with separate keys: a client exchanges keys with it before calling the procedures below, and encrypts with
+those keys, not deskconnd's.
 
 On a desktop (`DISPLAY` or `WAYLAND_DISPLAY` set) everything is served; on a headless server only printing is.
 
