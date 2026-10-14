@@ -3,42 +3,15 @@ package remotecontrol
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/godbus/dbus/v5"
-	"gopkg.in/yaml.v3"
-
-	"github.com/xconnio/deskconn/common"
 )
 
-func ScreenshotEnabled(cfgDirectory string) (bool, error) {
-	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	var config common.Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return false, err
-	}
-
-	return config.Screenshot.Enabled, nil
-}
-
+// Screenshot captures the screen. It's served while the screenshot app is enabled, which
+// it isn't until an owner or admin enables it (see RemoteControl.apps).
 func (s *Screen) Screenshot() ([]byte, error) {
-	ok, err := ScreenshotEnabled(s.cfgDirectory)
-	if err != nil {
-		return nil, err
-	}
-
-	if !ok {
-		return nil, fmt.Errorf("screenshot not enabled, run 'desk screenshot enable'")
-	}
-
 	return CaptureScreenshot(s.sessionBus)
 }
 
@@ -74,7 +47,8 @@ func CaptureScreenshot(conn *dbus.Conn) ([]byte, error) {
 		return nil, fmt.Errorf("screenshot portal: %w", err)
 	}
 
-	results, err := waitForPortalResponse(ch, handle, 5*time.Second)
+	// Long enough for someone at the machine to answer the portal's permission prompt.
+	results, err := waitForPortalResponse(ch, handle, time.Minute)
 	if err != nil {
 		return nil, err
 	}
@@ -143,8 +117,41 @@ func portalResponseError(respCode uint32) error {
 	case 1:
 		return fmt.Errorf("screenshot cancelled")
 	case 2:
-		return fmt.Errorf("screenshot failed, run 'desk screenshot enable' to grant permission")
+		return fmt.Errorf("screen capture isn't allowed on this machine: request permission and accept the prompt there")
 	default:
 		return fmt.Errorf("screenshot failed")
 	}
+}
+
+// LeaveAppScope moves this process into its own systemd scope when it was started inside
+// an app's scope (e.g. a terminal's or a snap's). The portal names the app asking for a
+// screenshot after that scope, and GNOME only shows the permission prompt to a named app
+// while it's focused; in its own scope the app is unnamed and the prompt always shows.
+func LeaveAppScope(conn *dbus.Conn) error {
+	cgroup, err := os.ReadFile("/proc/self/cgroup")
+	if err != nil {
+		return err
+	}
+
+	unit := strings.TrimSpace(string(cgroup))
+	unit = unit[strings.LastIndex(unit, "/")+1:]
+	if !strings.HasPrefix(unit, "app-") && !strings.HasPrefix(unit, "snap.") {
+		return nil
+	}
+
+	type property struct {
+		Name  string
+		Value dbus.Variant
+	}
+	type auxUnit struct {
+		Name  string
+		Props []property
+	}
+
+	pid := uint32(os.Getpid()) //nolint:gosec // pids are well below 2^32
+	name := fmt.Sprintf("remotecontrol-app-%d.scope", pid)
+	props := []property{{"PIDs", dbus.MakeVariant([]uint32{pid})}}
+
+	return conn.Object("org.freedesktop.systemd1", "/org/freedesktop/systemd1").Call(
+		"org.freedesktop.systemd1.Manager.StartTransientUnit", 0, name, "fail", props, []auxUnit{}).Err
 }

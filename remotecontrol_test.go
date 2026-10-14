@@ -1,8 +1,11 @@
 package remotecontrol_test
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/stretchr/testify/require"
@@ -27,6 +30,26 @@ func setupRouterAndConnectSessions(t *testing.T, n int) []*xconn.Session {
 		sessions[i], err = xconn.ConnectInMemory(r, "realm1")
 		require.NoError(t, err)
 	}
+
+	// deskconnd's side: every app registered is listed, enabled.
+	deskconnd, err := xconn.ConnectInMemory(r, "realm1")
+	require.NoError(t, err)
+	var apps []map[string]any
+	require.NoError(t, deskconnd.Register(common.ProcedureAppsRegister,
+		func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
+			payload, err := inv.ArgBytes(0)
+			require.NoError(t, err)
+			require.NoError(t, json.Unmarshal(payload, &apps))
+			for _, app := range apps {
+				require.Equal(t, remotecontrol.ProcedureKeyExchange, app["key_exchange"])
+				app["enabled"] = true
+			}
+			return xconn.NewInvocationResult()
+		}).Do().Err)
+	require.NoError(t, deskconnd.Register(common.ProcedureCapabilitiesList,
+		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
+			return xconn.NewInvocationResult(apps)
+		}).Do().Err)
 	return sessions
 }
 
@@ -65,14 +88,14 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	screen := remotecontrol.NewScreen(sessionConn, conn, t.TempDir())
+	screen := remotecontrol.NewScreen(sessionConn, conn)
 	mpris := remotecontrol.NewMPRIS(sessionConn)
 	audio := remotecontrol.NewAudio()
 	defer audio.Close()
 	r := remotecontrol.New(screen, mpris, audio, true)
 	require.NoError(t, r.Register(callee))
 
-	result, err := call(t, caller, common.ProcedureScreenBrightnessGet, nil)
+	result, err := call(t, caller, remotecontrol.ProcedureScreenBrightnessGet, nil)
 	if err != nil {
 		// Headless / DBus unavailable case
 		require.ErrorContains(t, err, "brightness device not available")
@@ -84,13 +107,13 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.GreaterOrEqual(t, initial, 0)
 	require.LessOrEqual(t, initial, 100)
 
-	_, err = call(t, caller, common.ProcedureScreenBrightnessSet, nil)
+	_, err = call(t, caller, remotecontrol.ProcedureScreenBrightnessSet, nil)
 	require.ErrorContains(t, err, "wamp.error.invalid_argument")
 
-	_, err = call(t, caller, common.ProcedureScreenBrightnessSet, 70)
+	_, err = call(t, caller, remotecontrol.ProcedureScreenBrightnessSet, 70)
 	require.NoError(t, err)
 
-	result, err = call(t, caller, common.ProcedureScreenBrightnessGet, nil)
+	result, err = call(t, caller, remotecontrol.ProcedureScreenBrightnessGet, nil)
 	require.NoError(t, err)
 	var updated int
 	require.NoError(t, json.Unmarshal(result, &updated))
@@ -105,11 +128,11 @@ func TestServerRegistersOnlyPrinter(t *testing.T) {
 	r := remotecontrol.New(nil, nil, nil, false)
 	require.NoError(t, r.Register(callee))
 
-	_, err := call(t, caller, common.ProcedureScreenLock, nil)
+	_, err := call(t, caller, remotecontrol.ProcedureScreenLock, nil)
 	require.ErrorContains(t, err, "wamp.error.no_such_procedure")
 
 	// Registered, though refused while printing is off.
-	_, err = call(t, caller, common.ProcedurePrinterPrint,
+	_, err = call(t, caller, remotecontrol.ProcedurePrinterPrint,
 		map[string]any{"printer": "p", "filename": "f.txt", "data": []byte("x")})
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "no_such_procedure")
@@ -122,11 +145,40 @@ func TestRequiresKeyExchange(t *testing.T) {
 	r := remotecontrol.New(nil, nil, nil, false)
 	require.NoError(t, r.Register(callee))
 
-	resp := caller.Call(common.ProcedurePrinterList).Do()
+	resp := caller.Call(remotecontrol.ProcedurePrinterList).Do()
 	require.ErrorContains(t, resp.Err, "call key exchange first")
 
 	// Keys from another caller's exchange don't count.
 	keys := keyExchange(t, caller)
-	_, err := common.EncryptedCall(other, common.ProcedurePrinterList, nil, keys)
+	_, err := common.EncryptedCall(other, remotecontrol.ProcedurePrinterList, nil, keys)
 	require.ErrorContains(t, err, "call key exchange first")
+}
+
+func TestFollowsEnabledApps(t *testing.T) {
+	sessions := setupRouterAndConnectSessions(t, 3)
+	callee, caller, deskconnd := sessions[0], sessions[1], sessions[2]
+
+	r := remotecontrol.New(nil, nil, nil, false)
+	require.NoError(t, r.Register(callee))
+
+	setPrinter := func(enabled bool) {
+		apps := []map[string]any{{"id": "printer", "enabled": enabled}}
+		require.NoError(t, deskconnd.Publish(common.TopicCapabilitiesChanged).Args(apps).Do().Err)
+	}
+	listPrinters := func() error {
+		_, err := call(t, caller, remotecontrol.ProcedurePrinterList, nil)
+		return err
+	}
+
+	setPrinter(false)
+	require.Eventually(t, func() bool {
+		err := listPrinters()
+		return err != nil && strings.Contains(err.Error(), "no_such_procedure")
+	}, time.Second, 10*time.Millisecond)
+
+	setPrinter(true)
+	require.Eventually(t, func() bool {
+		err := listPrinters()
+		return err == nil || !strings.Contains(err.Error(), "no_such_procedure")
+	}, time.Second, 10*time.Millisecond)
 }

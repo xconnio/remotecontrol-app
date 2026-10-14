@@ -40,9 +40,8 @@ func lockProviders() []*lockProvider {
 }
 
 type Screen struct {
-	sessionBus   *dbus.Conn
-	systemBus    *dbus.Conn
-	cfgDirectory string
+	sessionBus *dbus.Conn
+	systemBus  *dbus.Conn
 
 	lockProvider    *lockProvider
 	lockInitialized bool
@@ -55,11 +54,10 @@ type Screen struct {
 
 func (s *Screen) SessionBus() *dbus.Conn { return s.sessionBus }
 
-func NewScreen(sessionBus, systemBus *dbus.Conn, cfgDirectory string) *Screen {
+func NewScreen(sessionBus, systemBus *dbus.Conn) *Screen {
 	s := &Screen{
-		sessionBus:   sessionBus,
-		systemBus:    systemBus,
-		cfgDirectory: cfgDirectory,
+		sessionBus: sessionBus,
+		systemBus:  systemBus,
 	}
 
 	for _, p := range lockProviders() {

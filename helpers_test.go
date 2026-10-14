@@ -29,23 +29,24 @@ printing:
 `), 0600))
 
 	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeHost))
-	require.NoError(t, remotecontrol.EnableScreenshot(cfgDirectory))
 
 	data, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), "private_key: abc", "a section this app doesn't know is kept")
 	require.Contains(t, string(data), "authid: cloud")
-	require.Contains(t, string(data), "enabled: true")
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
 	require.Equal(t, common.PrintModeHost, mode)
 }
 
 func TestSettingWithoutConfig(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, remotecontrol.EnableScreenshot(dir))
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgDirectory := filepath.Join(home, ".deskconn")
+	require.NoError(t, os.MkdirAll(cfgDirectory, 0700))
+	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeHost))
 
-	data, err := os.ReadFile(filepath.Join(dir, "config.yml"))
+	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	require.NoError(t, err)
-	require.Equal(t, "screenshot:\n    enabled: true\n", string(data))
+	require.Equal(t, "printing:\n    mode: host\n", string(data))
 }

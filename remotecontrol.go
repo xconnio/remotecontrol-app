@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/http"
+	"slices"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 
@@ -14,10 +15,40 @@ import (
 	"github.com/xconnio/xconn-go"
 )
 
-// RemoteControl serves the machine's remote-control procedures: screen brightness and
-// lock, screenshots, media players (MPRIS), audio and printing.
+// ProcedureKeyExchange is this app's own key exchange. Every other procedure here is
+// end-to-end encrypted with the keys it derives.
+const ProcedureKeyExchange = "io.xconn.deskconn.deskconnd.remotecontrol.key.exchange"
+
+const (
+	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
+	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
+	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
+	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
+
+	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
+	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
+	ProcedureMPRISPlay      = "io.xconn.deskconn.deskconnd.mpris.play"
+	ProcedureMPRISPause     = "io.xconn.deskconn.deskconnd.mpris.pause"
+	ProcedureMPRISNext      = "io.xconn.deskconn.deskconnd.mpris.next"
+	ProcedureMPRISPrevious  = "io.xconn.deskconn.deskconnd.mpris.previous"
+
+	ProcedureAudioMute       = "io.xconn.deskconn.deskconnd.audio.mute"
+	ProcedureAudioUnmute     = "io.xconn.deskconn.deskconnd.audio.unmute"
+	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
+	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
+
+	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
+	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
+
+	ProcedurePrinterList  = "io.xconn.deskconn.deskconnd.printer.list"
+	ProcedurePrinterPrint = "io.xconn.deskconn.deskconnd.printer.print"
+)
+
+// RemoteControl serves the machine's remote-control apps: screen brightness and lock,
+// screenshots, media players (MPRIS), audio and printing.
 //
-// They're end-to-end encrypted with the keys of this app's own key exchange
+// It registers them with deskconnd and serves each app's procedures while the app is
+// enabled. They're end-to-end encrypted with the keys of this app's own key exchange
 // (ProcedureKeyExchange): every procedure takes its request as a single encrypted JSON
 // argument, empty or absent when it has none, and returns a single encrypted JSON result.
 type RemoteControl struct {
@@ -25,8 +56,13 @@ type RemoteControl struct {
 	mpris   *MPRIS
 	audio   *Audio
 	printer *Printer
-	keys    *keyStore
+	enc     *common.AppEncryption
 	desktop bool
+
+	mu      sync.Mutex
+	session *xconn.Session
+	// regs are the registered procedures, by URI.
+	regs map[string]xconn.RegisterResponse
 }
 
 // New returns a RemoteControl; screen, mpris and audio are only used when desktop is set.
@@ -36,120 +72,175 @@ func New(screen *Screen, mpris *MPRIS, audio *Audio, desktop bool) *RemoteContro
 		mpris:   mpris,
 		audio:   audio,
 		printer: NewPrinter(),
-		keys:    newKeyStore(),
+		enc:     common.NewAppEncryption(),
 		desktop: desktop,
 	}
 }
 
-// handler serves one remote-control procedure: req is the request's JSON, nil when there
-// is none, and the result is marshaled to JSON.
-type handler func(ctx context.Context, req []byte) (any, error)
+// app is one app as deskconnd's ProcedureAppsRegister takes it, with its procedures.
+type app struct {
+	ID          string                       `json:"id"`
+	Name        string                       `json:"name"`
+	KeyExchange string                       `json:"key_exchange"`
+	DefaultOff  bool                         `json:"default_off,omitempty"`
+	procedures  map[string]common.AppHandler `json:"-"`
+}
 
-// invalidArgumentError marks an error as the caller's, returned as ErrInvalidArgument.
-type invalidArgumentError struct{ error }
+func (r *RemoteControl) apps() []*app {
+	apps := []*app{{ID: "printer", Name: "Printer", procedures: map[string]common.AppHandler{
+		ProcedurePrinterList:  r.printer.listPrinters,
+		ProcedurePrinterPrint: r.printer.print,
+	}}}
 
-func (r *RemoteControl) Register(session *xconn.Session) error {
-	handlers := map[string]handler{
-		common.ProcedurePrinterList:  r.printer.listPrinters,
-		common.ProcedurePrinterPrint: r.printer.print,
-	}
-
-	// Display-related RPCs depend on a session D-Bus connection (screen, MPRIS) or
-	// PulseAudio (audio), neither of which is available on a headless server. Skip
-	// registering them there.
+	// Display-related apps depend on a session D-Bus connection (screen, MPRIS) or
+	// PulseAudio (audio), neither of which is available on a headless server.
 	if r.desktop {
-		maps.Copy(handlers, map[string]handler{
-			common.ProcedureScreenBrightnessGet:  r.brightnessGet,
-			common.ProcedureScreenBrightnessSet:  r.brightnessSet,
-			common.ProcedureScreenLock:           r.screenLock,
-			common.ProcedureScreenIsLocked:       r.screenIsLocked,
-			common.ProcedureMPRISPlayers:         r.listPlayers,
-			common.ProcedureMPRISPlayPause:       r.playerAction(r.mpris.PlayPause, r.mpris.PlayPausePlayer),
-			common.ProcedureMPRISPlay:            r.playerAction(r.mpris.Play, r.mpris.PlayPlayer),
-			common.ProcedureMPRISPause:           r.playerAction(r.mpris.Pause, r.mpris.PausePlayer),
-			common.ProcedureMPRISNext:            r.playerAction(r.mpris.Next, r.mpris.NextPlayer),
-			common.ProcedureMPRISPrevious:        r.playerAction(r.mpris.Previous, r.mpris.PreviousPlayer),
-			common.ProcedureAudioMute:            r.audioMute,
-			common.ProcedureAudioUnmute:          r.audioUnmute,
-			common.ProcedureAudioToggleMute:      r.audioToggleMute,
-			common.ProcedureAudioIsMuted:         r.audioIsMuted,
-			common.ProcedureScreenshot:           r.screenshot,
-			common.ProcedureScreenshotPermission: r.screenshotPermission,
-		})
+		apps = append(apps,
+			&app{ID: "screen", Name: "Screen", procedures: map[string]common.AppHandler{
+				ProcedureScreenBrightnessGet: r.brightnessGet,
+				ProcedureScreenBrightnessSet: r.brightnessSet,
+				ProcedureScreenLock:          r.screenLock,
+				ProcedureScreenIsLocked:      r.screenIsLocked,
+			}},
+			// Off until an owner or admin enables it: it shows what's on the screen.
+			&app{ID: "screenshot", Name: "Screenshot", DefaultOff: true, procedures: map[string]common.AppHandler{
+				ProcedureScreenshot:           r.screenshot,
+				ProcedureScreenshotPermission: r.screenshotPermission,
+			}},
+			&app{ID: "media-player", Name: "Media Player", procedures: map[string]common.AppHandler{
+				ProcedureMPRISPlayers:   r.listPlayers,
+				ProcedureMPRISPlayPause: r.playerAction(r.mpris.PlayPause, r.mpris.PlayPausePlayer),
+				ProcedureMPRISPlay:      r.playerAction(r.mpris.Play, r.mpris.PlayPlayer),
+				ProcedureMPRISPause:     r.playerAction(r.mpris.Pause, r.mpris.PausePlayer),
+				ProcedureMPRISNext:      r.playerAction(r.mpris.Next, r.mpris.NextPlayer),
+				ProcedureMPRISPrevious:  r.playerAction(r.mpris.Previous, r.mpris.PreviousPlayer),
+			}},
+			&app{ID: "audio", Name: "Audio", procedures: map[string]common.AppHandler{
+				ProcedureAudioMute:       r.audioMute,
+				ProcedureAudioUnmute:     r.audioUnmute,
+				ProcedureAudioToggleMute: r.audioToggleMute,
+				ProcedureAudioIsMuted:    r.audioIsMuted,
+			}},
+		)
 	}
-
-	invocationHandlers := map[string]xconn.InvocationHandler{ProcedureKeyExchange: r.handleKeyExchange}
-	for procedure, h := range handlers {
-		invocationHandlers[procedure] = r.encrypted(h)
+	for _, a := range apps {
+		a.KeyExchange = ProcedureKeyExchange
 	}
-	for uri, h := range invocationHandlers {
-		response := session.Register(uri, h).Invoke(wampproto.InvokeLast).Do()
-		if response.Err != nil {
-			return response.Err
-		}
+	return apps
+}
 
-		log.Printf("Registered procedure %s", uri)
+// Register registers the apps with deskconnd on session, its local socket, and serves the
+// enabled ones' procedures there, following deskconnd as they're enabled and disabled.
+func (r *RemoteControl) Register(session *xconn.Session) error {
+	r.mu.Lock()
+	r.session = session
+	r.regs = map[string]xconn.RegisterResponse{}
+	r.mu.Unlock()
+
+	if err := r.enc.Register(session, ProcedureKeyExchange); err != nil {
+		return err
 	}
-
-	if resp := session.Subscribe(metaTopicSessionLeave, r.handleSessionLeave).Do(); resp.Err != nil {
+	if resp := session.Subscribe(common.TopicCapabilitiesChanged, r.handleCapabilitiesChanged).Do(); resp.Err != nil {
 		return resp.Err
+	}
+	payload, err := json.Marshal(r.apps())
+	if err != nil {
+		return err
+	}
+	if resp := session.Call(common.ProcedureAppsRegister).Args(payload).Do(); resp.Err != nil {
+		return resp.Err
+	}
+	resp := session.Call(common.ProcedureCapabilitiesList).Do()
+	if resp.Err != nil {
+		return resp.Err
+	}
+	if len(resp.Args()) == 0 {
+		return errors.New("deskconnd returned no apps list")
+	}
+	return r.subscribe(resp.Args()[0])
+}
+
+func (r *RemoteControl) handleCapabilitiesChanged(event *xconn.Event) {
+	if len(event.Args()) == 0 {
+		return
+	}
+	if err := r.subscribe(event.Args()[0]); err != nil {
+		log.WithError(err).Error("failed to follow enabled apps")
+	}
+}
+
+// appState is an app as deskconnd's apps list has it.
+type appState struct {
+	ID      string `json:"id"`
+	Enabled bool   `json:"enabled"`
+}
+
+// subscribe registers the procedures of the apps that list, deskconnd's apps list, has
+// enabled, and unsubscribes the rest.
+func (r *RemoteControl) subscribe(list any) error {
+	data, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	var states []appState
+	if err := json.Unmarshal(data, &states); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, a := range r.apps() {
+		enabled := slices.ContainsFunc(states, func(s appState) bool { return s.ID == a.ID && s.Enabled })
+		if !enabled {
+			if err := r.unsubscribe(a); err != nil {
+				return err
+			}
+			continue
+		}
+		for uri, h := range a.procedures {
+			if _, ok := r.regs[uri]; ok {
+				continue
+			}
+			resp := r.session.Register(uri, r.enc.Encrypted(h)).Invoke(wampproto.InvokeLast).Do()
+			if resp.Err != nil {
+				return resp.Err
+			}
+			r.regs[uri] = resp
+			log.Printf("Registered procedure %s", uri)
+		}
 	}
 	return nil
 }
 
-// encrypted adapts h to a WAMP procedure: it decrypts the request with the caller's keys
-// and encrypts h's JSON result.
-func (r *RemoteControl) encrypted(h handler) xconn.InvocationHandler {
-	return func(ctx context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
-		keys, ok := r.keys.fetch(inv.Caller())
+// unsubscribe unregisters a's procedures. r must be locked.
+func (r *RemoteControl) unsubscribe(a *app) error {
+	for uri := range a.procedures {
+		reg, ok := r.regs[uri]
 		if !ok {
-			return xconn.NewInvocationError(common.ErrInvalidArgument, "no session keys found, call key exchange first")
+			continue
 		}
-
-		var req []byte
-		if len(inv.Args()) > 0 {
-			encrypted, err := inv.ArgBytes(0)
-			if err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-			}
-			if req, err = common.DecryptPayload(encrypted, keys.receiveKey); err != nil {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-			}
-			// An empty request, e.g. a client encrypting no payload, is no request.
-			if len(req) == 0 {
-				req = nil
-			}
+		if err := reg.Unregister(); err != nil {
+			return err
 		}
-
-		result, err := h(ctx, req)
-		if err != nil {
-			var argErr invalidArgumentError
-			if errors.As(err, &argErr) {
-				return xconn.NewInvocationError(common.ErrInvalidArgument, err.Error())
-			}
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-
-		data, err := json.Marshal(result)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-		encryptedResult, err := common.EncryptPayload(data, keys.sendKey)
-		if err != nil {
-			return xconn.NewInvocationError(common.ErrOperationFailed, err.Error())
-		}
-		return xconn.NewInvocationResult(encryptedResult)
+		delete(r.regs, uri)
+		log.Printf("Unregistered procedure %s", uri)
 	}
+	return nil
+}
+
+// invalidArgument marks err as the caller's, returned as ErrInvalidArgument.
+func invalidArgument(err error) error {
+	return &xconn.Error{URI: common.ErrInvalidArgument, Args: []any{err.Error()}}
 }
 
 // decodeRequest unmarshals req into out, reporting a missing or malformed request as the
 // caller's error.
 func decodeRequest(req []byte, out any) error {
 	if req == nil {
-		return invalidArgumentError{errors.New("missing request")}
+		return invalidArgument(errors.New("missing request"))
 	}
 	if err := json.Unmarshal(req, out); err != nil {
-		return invalidArgumentError{err}
+		return invalidArgument(err)
 	}
 	return nil
 }
@@ -179,7 +270,7 @@ func (r *RemoteControl) listPlayers(_ context.Context, _ []byte) (any, error) {
 }
 
 // playerAction runs all on every player, or one on the player the request names.
-func (r *RemoteControl) playerAction(all func() error, one func(string) error) handler {
+func (r *RemoteControl) playerAction(all func() error, one func(string) error) common.AppHandler {
 	return func(_ context.Context, req []byte) (any, error) {
 		if req == nil {
 			return nil, all()
