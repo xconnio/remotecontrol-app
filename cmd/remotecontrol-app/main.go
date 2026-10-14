@@ -46,7 +46,11 @@ func main() {
 		}
 		defer sessionBus.Close()
 
-		screen = remotecontrol.NewScreen(sessionBus, systemBus, cfgDirectory)
+		if err := remotecontrol.LeaveAppScope(sessionBus); err != nil {
+			log.WithError(err).Warn("couldn't leave the app scope, the screenshot permission prompt may not show")
+		}
+
+		screen = remotecontrol.NewScreen(sessionBus, systemBus)
 		mpris = remotecontrol.NewMPRIS(sessionBus)
 		audio = remotecontrol.NewAudio()
 		defer audio.Close()

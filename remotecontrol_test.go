@@ -88,7 +88,7 @@ func TestBrightnessGetSet(t *testing.T) {
 	require.NoError(t, err)
 	sessionConn, err := dbus.ConnectSessionBus()
 	require.NoError(t, err)
-	screen := remotecontrol.NewScreen(sessionConn, conn, t.TempDir())
+	screen := remotecontrol.NewScreen(sessionConn, conn)
 	mpris := remotecontrol.NewMPRIS(sessionConn)
 	audio := remotecontrol.NewAudio()
 	defer audio.Close()

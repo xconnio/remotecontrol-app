@@ -82,6 +82,7 @@ type app struct {
 	ID          string                       `json:"id"`
 	Name        string                       `json:"name"`
 	KeyExchange string                       `json:"key_exchange"`
+	DefaultOff  bool                         `json:"default_off,omitempty"`
 	procedures  map[string]common.AppHandler `json:"-"`
 }
 
@@ -101,7 +102,8 @@ func (r *RemoteControl) apps() []*app {
 				ProcedureScreenLock:          r.screenLock,
 				ProcedureScreenIsLocked:      r.screenIsLocked,
 			}},
-			&app{ID: "screenshot", Name: "Screenshot", procedures: map[string]common.AppHandler{
+			// Off until an owner or admin enables it: it shows what's on the screen.
+			&app{ID: "screenshot", Name: "Screenshot", DefaultOff: true, procedures: map[string]common.AppHandler{
 				ProcedureScreenshot:           r.screenshot,
 				ProcedureScreenshotPermission: r.screenshotPermission,
 			}},
