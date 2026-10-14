@@ -65,10 +65,10 @@ func (p *Printer) print(ctx context.Context, req []byte) (any, error) {
 		return nil, err
 	}
 	if strings.TrimSpace(args.Printer) == "" {
-		return nil, invalidArgumentError{errors.New("empty printer name")}
+		return nil, invalidArgument(errors.New("empty printer name"))
 	}
 	if len(args.Data) == 0 {
-		return nil, invalidArgumentError{errors.New("empty print payload")}
+		return nil, invalidArgument(errors.New("empty print payload"))
 	}
 
 	jobID := fmt.Sprintf("%s-%d", args.Printer, time.Now().UnixNano())
