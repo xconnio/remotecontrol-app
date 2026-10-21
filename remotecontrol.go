@@ -17,31 +17,31 @@ import (
 
 // ProcedureKeyExchange is this app's own key exchange. Every other procedure here is
 // end-to-end encrypted with the keys it derives.
-const ProcedureKeyExchange = "io.xconn.deskconn.deskconnd.remotecontrol.key.exchange"
+const ProcedureKeyExchange = "io.xconn.remotecontrol.key.exchange"
 
 const (
-	ProcedureScreenBrightnessGet = "io.xconn.deskconn.deskconnd.screen.brightness.get"
-	ProcedureScreenBrightnessSet = "io.xconn.deskconn.deskconnd.screen.brightness.set"
-	ProcedureScreenLock          = "io.xconn.deskconn.deskconnd.screen.lock"
-	ProcedureScreenIsLocked      = "io.xconn.deskconn.deskconnd.screen.islocked"
+	ProcedureScreenBrightnessGet = "io.xconn.remotecontrol.screen.brightness.get"
+	ProcedureScreenBrightnessSet = "io.xconn.remotecontrol.screen.brightness.set"
+	ProcedureScreenLock          = "io.xconn.remotecontrol.screen.lock"
+	ProcedureScreenIsLocked      = "io.xconn.remotecontrol.screen.islocked"
 
-	ProcedureMPRISPlayers   = "io.xconn.deskconn.deskconnd.mpris.players"
-	ProcedureMPRISPlayPause = "io.xconn.deskconn.deskconnd.mpris.playpause"
-	ProcedureMPRISPlay      = "io.xconn.deskconn.deskconnd.mpris.play"
-	ProcedureMPRISPause     = "io.xconn.deskconn.deskconnd.mpris.pause"
-	ProcedureMPRISNext      = "io.xconn.deskconn.deskconnd.mpris.next"
-	ProcedureMPRISPrevious  = "io.xconn.deskconn.deskconnd.mpris.previous"
+	ProcedureMPRISPlayers   = "io.xconn.remotecontrol.mpris.players"
+	ProcedureMPRISPlayPause = "io.xconn.remotecontrol.mpris.playpause"
+	ProcedureMPRISPlay      = "io.xconn.remotecontrol.mpris.play"
+	ProcedureMPRISPause     = "io.xconn.remotecontrol.mpris.pause"
+	ProcedureMPRISNext      = "io.xconn.remotecontrol.mpris.next"
+	ProcedureMPRISPrevious  = "io.xconn.remotecontrol.mpris.previous"
 
-	ProcedureAudioMute       = "io.xconn.deskconn.deskconnd.audio.mute"
-	ProcedureAudioUnmute     = "io.xconn.deskconn.deskconnd.audio.unmute"
-	ProcedureAudioToggleMute = "io.xconn.deskconn.deskconnd.audio.togglemute"
-	ProcedureAudioIsMuted    = "io.xconn.deskconn.deskconnd.audio.ismuted"
+	ProcedureAudioMute       = "io.xconn.remotecontrol.audio.mute"
+	ProcedureAudioUnmute     = "io.xconn.remotecontrol.audio.unmute"
+	ProcedureAudioToggleMute = "io.xconn.remotecontrol.audio.togglemute"
+	ProcedureAudioIsMuted    = "io.xconn.remotecontrol.audio.ismuted"
 
-	ProcedureScreenshot           = "io.xconn.deskconn.deskconnd.screenshot"
-	ProcedureScreenshotPermission = "io.xconn.deskconn.deskconnd.screenshot.permission"
+	ProcedureScreenshot           = "io.xconn.remotecontrol.screenshot"
+	ProcedureScreenshotPermission = "io.xconn.remotecontrol.screenshot.permission"
 
-	ProcedurePrinterList  = "io.xconn.deskconn.deskconnd.printer.list"
-	ProcedurePrinterPrint = "io.xconn.deskconn.deskconnd.printer.print"
+	ProcedurePrinterList  = "io.xconn.remotecontrol.printer.list"
+	ProcedurePrinterPrint = "io.xconn.remotecontrol.printer.print"
 )
 
 // RemoteControl serves the machine's remote-control apps: screen brightness and lock,
