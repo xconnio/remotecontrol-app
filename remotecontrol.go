@@ -10,7 +10,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/appkit"
 	"github.com/xconnio/wampproto-go"
 	"github.com/xconnio/xconn-go"
 )
@@ -56,7 +56,7 @@ type RemoteControl struct {
 	mpris   *MPRIS
 	audio   *Audio
 	printer *Printer
-	enc     *common.AppEncryption
+	enc     *appkit.Encryption
 	desktop bool
 
 	mu      sync.Mutex
@@ -72,22 +72,22 @@ func New(screen *Screen, mpris *MPRIS, audio *Audio, desktop bool) *RemoteContro
 		mpris:   mpris,
 		audio:   audio,
 		printer: NewPrinter(),
-		enc:     common.NewAppEncryption(),
+		enc:     appkit.NewEncryption(),
 		desktop: desktop,
 	}
 }
 
 // app is one app as deskconnd's ProcedureAppsRegister takes it, with its procedures.
 type app struct {
-	ID          string                       `json:"id"`
-	Name        string                       `json:"name"`
-	KeyExchange string                       `json:"key_exchange"`
-	DefaultOff  bool                         `json:"default_off,omitempty"`
-	procedures  map[string]common.AppHandler `json:"-"`
+	ID          string                    `json:"id"`
+	Name        string                    `json:"name"`
+	KeyExchange string                    `json:"key_exchange"`
+	DefaultOff  bool                      `json:"default_off,omitempty"`
+	procedures  map[string]appkit.Handler `json:"-"`
 }
 
 func (r *RemoteControl) apps() []*app {
-	apps := []*app{{ID: "printer", Name: "Printer", procedures: map[string]common.AppHandler{
+	apps := []*app{{ID: "printer", Name: "Printer", procedures: map[string]appkit.Handler{
 		ProcedurePrinterList:  r.printer.listPrinters,
 		ProcedurePrinterPrint: r.printer.print,
 	}}}
@@ -96,18 +96,18 @@ func (r *RemoteControl) apps() []*app {
 	// PulseAudio (audio), neither of which is available on a headless server.
 	if r.desktop {
 		apps = append(apps,
-			&app{ID: "screen", Name: "Screen", procedures: map[string]common.AppHandler{
+			&app{ID: "screen", Name: "Screen", procedures: map[string]appkit.Handler{
 				ProcedureScreenBrightnessGet: r.brightnessGet,
 				ProcedureScreenBrightnessSet: r.brightnessSet,
 				ProcedureScreenLock:          r.screenLock,
 				ProcedureScreenIsLocked:      r.screenIsLocked,
 			}},
 			// Off until an owner or admin enables it: it shows what's on the screen.
-			&app{ID: "screenshot", Name: "Screenshot", DefaultOff: true, procedures: map[string]common.AppHandler{
+			&app{ID: "screenshot", Name: "Screenshot", DefaultOff: true, procedures: map[string]appkit.Handler{
 				ProcedureScreenshot:           r.screenshot,
 				ProcedureScreenshotPermission: r.screenshotPermission,
 			}},
-			&app{ID: "media-player", Name: "Media Player", procedures: map[string]common.AppHandler{
+			&app{ID: "media-player", Name: "Media Player", procedures: map[string]appkit.Handler{
 				ProcedureMPRISPlayers:   r.listPlayers,
 				ProcedureMPRISPlayPause: r.playerAction(r.mpris.PlayPause, r.mpris.PlayPausePlayer),
 				ProcedureMPRISPlay:      r.playerAction(r.mpris.Play, r.mpris.PlayPlayer),
@@ -115,7 +115,7 @@ func (r *RemoteControl) apps() []*app {
 				ProcedureMPRISNext:      r.playerAction(r.mpris.Next, r.mpris.NextPlayer),
 				ProcedureMPRISPrevious:  r.playerAction(r.mpris.Previous, r.mpris.PreviousPlayer),
 			}},
-			&app{ID: "audio", Name: "Audio", procedures: map[string]common.AppHandler{
+			&app{ID: "audio", Name: "Audio", procedures: map[string]appkit.Handler{
 				ProcedureAudioMute:       r.audioMute,
 				ProcedureAudioUnmute:     r.audioUnmute,
 				ProcedureAudioToggleMute: r.audioToggleMute,
@@ -140,17 +140,17 @@ func (r *RemoteControl) Register(session *xconn.Session) error {
 	if err := r.enc.Register(session, ProcedureKeyExchange); err != nil {
 		return err
 	}
-	if resp := session.Subscribe(common.TopicCapabilitiesChanged, r.handleCapabilitiesChanged).Do(); resp.Err != nil {
+	if resp := session.Subscribe(appkit.TopicCapabilitiesChanged, r.handleCapabilitiesChanged).Do(); resp.Err != nil {
 		return resp.Err
 	}
 	payload, err := json.Marshal(r.apps())
 	if err != nil {
 		return err
 	}
-	if resp := session.Call(common.ProcedureAppsRegister).Args(payload).Do(); resp.Err != nil {
+	if resp := session.Call(appkit.ProcedureAppsRegister).Args(payload).Do(); resp.Err != nil {
 		return resp.Err
 	}
-	resp := session.Call(common.ProcedureCapabilitiesList).Do()
+	resp := session.Call(appkit.ProcedureCapabilitiesList).Do()
 	if resp.Err != nil {
 		return resp.Err
 	}
@@ -230,7 +230,7 @@ func (r *RemoteControl) unsubscribe(a *app) error {
 
 // invalidArgument marks err as the caller's, returned as ErrInvalidArgument.
 func invalidArgument(err error) error {
-	return &xconn.Error{URI: common.ErrInvalidArgument, Args: []any{err.Error()}}
+	return &xconn.Error{URI: appkit.ErrInvalidArgument, Args: []any{err.Error()}}
 }
 
 // decodeRequest unmarshals req into out, reporting a missing or malformed request as the
@@ -270,7 +270,7 @@ func (r *RemoteControl) listPlayers(_ context.Context, _ []byte) (any, error) {
 }
 
 // playerAction runs all on every player, or one on the player the request names.
-func (r *RemoteControl) playerAction(all func() error, one func(string) error) common.AppHandler {
+func (r *RemoteControl) playerAction(all func() error, one func(string) error) appkit.Handler {
 	return func(_ context.Context, req []byte) (any, error) {
 		if req == nil {
 			return nil, all()

@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/common"
 	remotecontrol "github.com/xconnio/remotecontrol-app"
 )
 
@@ -28,7 +27,7 @@ printing:
   mode: accept
 `), 0600))
 
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeHost))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeHost))
 
 	data, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
@@ -36,7 +35,7 @@ printing:
 	require.Contains(t, string(data), "authid: cloud")
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeHost, mode)
+	require.Equal(t, remotecontrol.PrintModeHost, mode)
 }
 
 func TestSettingWithoutConfig(t *testing.T) {
@@ -44,7 +43,7 @@ func TestSettingWithoutConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	cfgDirectory := filepath.Join(home, ".deskconn")
 	require.NoError(t, os.MkdirAll(cfgDirectory, 0700))
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeHost))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeHost))
 
 	data, err := os.ReadFile(filepath.Join(cfgDirectory, "config.yml"))
 	require.NoError(t, err)

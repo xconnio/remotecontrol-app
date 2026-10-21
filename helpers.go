@@ -9,11 +9,15 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-
-	"github.com/xconnio/deskconn/common"
 )
 
-const extSVG = ".svg"
+const (
+	extPNG  = ".png"
+	extWebP = ".webp"
+	extGIF  = ".gif"
+	extBMP  = ".bmp"
+	extSVG  = ".svg"
+)
 
 func fileURIToPath(raw string) string {
 	if strings.HasPrefix(raw, "file://") {
@@ -27,13 +31,13 @@ func fileURIToPath(raw string) string {
 
 func imageMimeTypeByExt(path string) string {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case common.ExtPng:
+	case extPNG:
 		return "image/png"
-	case common.ExtWebp:
+	case extWebP:
 		return "image/webp"
-	case common.ExtGif:
+	case extGIF:
 		return "image/gif"
-	case common.ExtBmp:
+	case extBMP:
 		return "image/bmp"
 	case extSVG:
 		return "image/svg+xml"

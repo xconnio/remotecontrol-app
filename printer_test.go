@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
-	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/appkit"
 	remotecontrol "github.com/xconnio/remotecontrol-app"
 )
 
 func saveConfigFile(t *testing.T) func() {
 	t.Helper()
-	cfgDir, err := common.CfgDirectory()
+	cfgDir, err := appkit.CfgDirectory()
 	require.NoError(t, err)
 	cfgPath := filepath.Join(cfgDir, "config.yml")
 
@@ -31,47 +31,47 @@ func saveConfigFile(t *testing.T) func() {
 func TestCurrentPrintModeNoConfig(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
 
-	cfgDir, err := common.CfgDirectory()
+	cfgDir, err := appkit.CfgDirectory()
 	require.NoError(t, err)
 	_ = os.Remove(filepath.Join(cfgDir, "config.yml"))
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeDisabled, mode)
+	require.Equal(t, remotecontrol.PrintModeDisabled, mode)
 }
 
 func TestCurrentPrintModeAccept(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeAccept))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeAccept))
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeAccept, mode)
+	require.Equal(t, remotecontrol.PrintModeAccept, mode)
 }
 
 func TestCurrentPrintModeHost(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeHost))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeHost))
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeHost, mode)
+	require.Equal(t, remotecontrol.PrintModeHost, mode)
 }
 
 func TestCurrentPrintModeDisabled(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeAccept))
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeDisabled))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeAccept))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeDisabled))
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeDisabled, mode)
+	require.Equal(t, remotecontrol.PrintModeDisabled, mode)
 }
 
 func TestCurrentPrintModeEmptyModeField(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
 
-	cfgDir, err := common.CfgDirectory()
+	cfgDir, err := appkit.CfgDirectory()
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(cfgDir, "config.yml"),
@@ -81,13 +81,13 @@ func TestCurrentPrintModeEmptyModeField(t *testing.T) {
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeDisabled, mode)
+	require.Equal(t, remotecontrol.PrintModeDisabled, mode)
 }
 
 func TestCurrentPrintModeUnknownMode(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
 
-	cfgDir, err := common.CfgDirectory()
+	cfgDir, err := appkit.CfgDirectory()
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(
 		filepath.Join(cfgDir, "config.yml"),
@@ -107,7 +107,7 @@ func TestSetPrintModeUnsupported(t *testing.T) {
 func TestSetPrintModePreservesExistingConfig(t *testing.T) {
 	t.Cleanup(saveConfigFile(t))
 
-	cfgDir, err := common.CfgDirectory()
+	cfgDir, err := appkit.CfgDirectory()
 	require.NoError(t, err)
 
 	type minConfig struct {
@@ -118,11 +118,13 @@ func TestSetPrintModePreservesExistingConfig(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(cfgDir, "config.yml"), data, 0600))
 
-	require.NoError(t, remotecontrol.SetPrintMode(common.PrintModeAccept))
+	require.NoError(t, remotecontrol.SetPrintMode(remotecontrol.PrintModeAccept))
 
-	machines, err := common.MachinesFromCfg(cfgDir)
+	data, err = os.ReadFile(filepath.Join(cfgDir, "config.yml"))
 	require.NoError(t, err)
-	require.Len(t, machines, 1, "SetPrintMode must not erase other config sections")
+	var saved minConfig
+	require.NoError(t, yaml.Unmarshal(data, &saved))
+	require.Equal(t, seed.Machines, saved.Machines, "SetPrintMode must not erase other config sections")
 }
 
 func TestEnablePrinting(t *testing.T) {
@@ -131,7 +133,7 @@ func TestEnablePrinting(t *testing.T) {
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeAccept, mode)
+	require.Equal(t, remotecontrol.PrintModeAccept, mode)
 }
 
 func TestEnablePrinterHosting(t *testing.T) {
@@ -140,7 +142,7 @@ func TestEnablePrinterHosting(t *testing.T) {
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeHost, mode)
+	require.Equal(t, remotecontrol.PrintModeHost, mode)
 }
 
 func TestDisablePrinting(t *testing.T) {
@@ -151,7 +153,7 @@ func TestDisablePrinting(t *testing.T) {
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeDisabled, mode)
+	require.Equal(t, remotecontrol.PrintModeDisabled, mode)
 }
 
 func TestDisablePrintingIdempotent(t *testing.T) {
@@ -161,5 +163,5 @@ func TestDisablePrintingIdempotent(t *testing.T) {
 
 	mode, err := remotecontrol.CurrentPrintMode()
 	require.NoError(t, err)
-	require.Equal(t, common.PrintModeDisabled, mode)
+	require.Equal(t, remotecontrol.PrintModeDisabled, mode)
 }

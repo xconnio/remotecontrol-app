@@ -8,9 +8,9 @@ require (
 	github.com/phin1x/go-ipp v1.7.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.12.1
-	github.com/xconnio/deskconn v0.1.0-alpha.ffce955.0.20261014090934-f20277c17bf7
+	github.com/xconnio/deskconn v0.1.0-alpha.ffce955.0.20261021132101-94de398e2b65
 	github.com/xconnio/wampproto-go v0.0.0-20260623091423-ecb54c6c2318
-	github.com/xconnio/xconn-go v0.1.1-0.20261014081049-1e92c06558da
+	github.com/xconnio/xconn-go v0.1.1-0.20261021120311-3b3492dec74d
 	gopkg.in/yaml.v3 v3.0.1
 )
 

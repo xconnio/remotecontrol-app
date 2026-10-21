@@ -10,7 +10,7 @@ import (
 	"github.com/godbus/dbus/v5"
 	"github.com/stretchr/testify/require"
 
-	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/appkit"
 	remotecontrol "github.com/xconnio/remotecontrol-app"
 	"github.com/xconnio/xconn-go"
 )
@@ -35,7 +35,7 @@ func setupRouterAndConnectSessions(t *testing.T, n int) []*xconn.Session {
 	deskconnd, err := xconn.ConnectInMemory(r, "realm1")
 	require.NoError(t, err)
 	var apps []map[string]any
-	require.NoError(t, deskconnd.Register(common.ProcedureAppsRegister,
+	require.NoError(t, deskconnd.Register(appkit.ProcedureAppsRegister,
 		func(_ context.Context, inv *xconn.Invocation) *xconn.InvocationResult {
 			payload, err := inv.ArgBytes(0)
 			require.NoError(t, err)
@@ -46,7 +46,7 @@ func setupRouterAndConnectSessions(t *testing.T, n int) []*xconn.Session {
 			}
 			return xconn.NewInvocationResult()
 		}).Do().Err)
-	require.NoError(t, deskconnd.Register(common.ProcedureCapabilitiesList,
+	require.NoError(t, deskconnd.Register(appkit.ProcedureCapabilitiesList,
 		func(_ context.Context, _ *xconn.Invocation) *xconn.InvocationResult {
 			return xconn.NewInvocationResult(apps)
 		}).Do().Err)
@@ -54,17 +54,11 @@ func setupRouterAndConnectSessions(t *testing.T, n int) []*xconn.Session {
 }
 
 // keyExchange performs the app's key exchange as a client would.
-func keyExchange(t *testing.T, caller *xconn.Session) *common.SessionKeys {
+func keyExchange(t *testing.T, caller *xconn.Session) *appkit.SessionKeys {
 	t.Helper()
-	publicKey, privateKey, err := common.CreateX25519KeyPair()
+	keys, err := appkit.ClientKeyExchange(caller, remotecontrol.ProcedureKeyExchange)
 	require.NoError(t, err)
-	resp := caller.Call(remotecontrol.ProcedureKeyExchange).Arg(publicKey).Do()
-	require.NoError(t, resp.Err)
-	serverPublicKey, err := resp.ArgBytes(0)
-	require.NoError(t, err)
-	sendKey, receiveKey, err := common.ClientKeyExchangeKeys(privateKey, serverPublicKey)
-	require.NoError(t, err)
-	return &common.SessionKeys{SendKey: sendKey, ReceiveKey: receiveKey}
+	return keys
 }
 
 // call calls procedure as a client would: after a key exchange, with req as encrypted
@@ -77,7 +71,7 @@ func call(t *testing.T, caller *xconn.Session, procedure string, req any) ([]byt
 		payload, err = json.Marshal(req)
 		require.NoError(t, err)
 	}
-	return common.EncryptedCall(caller, procedure, payload, keyExchange(t, caller))
+	return appkit.EncryptedCall(caller, procedure, payload, keyExchange(t, caller))
 }
 
 func TestBrightnessGetSet(t *testing.T) {
@@ -150,7 +144,7 @@ func TestRequiresKeyExchange(t *testing.T) {
 
 	// Keys from another caller's exchange don't count.
 	keys := keyExchange(t, caller)
-	_, err := common.EncryptedCall(other, remotecontrol.ProcedurePrinterList, nil, keys)
+	_, err := appkit.EncryptedCall(other, remotecontrol.ProcedurePrinterList, nil, keys)
 	require.ErrorContains(t, err, "call key exchange first")
 }
 
@@ -163,7 +157,7 @@ func TestFollowsEnabledApps(t *testing.T) {
 
 	setPrinter := func(enabled bool) {
 		apps := []map[string]any{{"id": "printer", "enabled": enabled}}
-		require.NoError(t, deskconnd.Publish(common.TopicCapabilitiesChanged).Args(apps).Do().Err)
+		require.NoError(t, deskconnd.Publish(appkit.TopicCapabilitiesChanged).Args(apps).Do().Err)
 	}
 	listPrinters := func() error {
 		_, err := call(t, caller, remotecontrol.ProcedurePrinterList, nil)
