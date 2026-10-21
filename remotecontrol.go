@@ -2,6 +2,8 @@ package remotecontrol
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -25,6 +27,9 @@ const (
 	ProcedureScreenLock          = "io.xconn.remotecontrol.screen.lock"
 	ProcedureScreenIsLocked      = "io.xconn.remotecontrol.screen.islocked"
 
+	ProcedureWallpaperGet      = "io.xconn.remotecontrol.wallpaper.get"
+	ProcedureWallpaperChecksum = "io.xconn.remotecontrol.wallpaper.checksum"
+
 	ProcedureMPRISPlayers   = "io.xconn.remotecontrol.mpris.players"
 	ProcedureMPRISPlayPause = "io.xconn.remotecontrol.mpris.playpause"
 	ProcedureMPRISPlay      = "io.xconn.remotecontrol.mpris.play"
@@ -44,8 +49,8 @@ const (
 	ProcedurePrinterPrint = "io.xconn.remotecontrol.printer.print"
 )
 
-// RemoteControl serves the machine's remote-control apps: screen brightness and lock,
-// screenshots, media players (MPRIS), audio and printing.
+// RemoteControl serves the machine's remote-control apps: screen brightness, lock and
+// wallpaper, screenshots, media players (MPRIS), audio and printing.
 //
 // It registers them with deskconnd and serves each app's procedures while the app is
 // enabled. They're end-to-end encrypted with the keys of this app's own key exchange
@@ -101,6 +106,8 @@ func (r *RemoteControl) apps() []*app {
 				ProcedureScreenBrightnessSet: r.brightnessSet,
 				ProcedureScreenLock:          r.screenLock,
 				ProcedureScreenIsLocked:      r.screenIsLocked,
+				ProcedureWallpaperGet:        r.wallpaperGet,
+				ProcedureWallpaperChecksum:   r.wallpaperChecksum,
 			}},
 			// Off until an owner or admin enables it: it shows what's on the screen.
 			&app{ID: "screenshot", Name: "Screenshot", DefaultOff: true, procedures: map[string]appkit.Handler{
@@ -263,6 +270,23 @@ func (r *RemoteControl) screenLock(_ context.Context, _ []byte) (any, error) {
 
 func (r *RemoteControl) screenIsLocked(_ context.Context, _ []byte) (any, error) {
 	return r.screen.IsLocked()
+}
+
+func (r *RemoteControl) wallpaperGet(_ context.Context, _ []byte) (any, error) {
+	path, data, err := r.screen.Wallpaper()
+	if err != nil {
+		return nil, err
+	}
+	return imageResult{Mime: imageMimeTypeByExt(path), Data: data}, nil
+}
+
+func (r *RemoteControl) wallpaperChecksum(_ context.Context, _ []byte) (any, error) {
+	_, data, err := r.screen.Wallpaper()
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 func (r *RemoteControl) listPlayers(_ context.Context, _ []byte) (any, error) {
