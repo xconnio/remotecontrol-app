@@ -5,14 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/godbus/dbus/v5"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/xconnio/deskconn/common"
+	"github.com/xconnio/deskconn/appkit"
 	remotecontrol "github.com/xconnio/remotecontrol-app"
 	"github.com/xconnio/xconn-go"
 )
@@ -22,7 +21,7 @@ import (
 const reconnectDelay = 5 * time.Second
 
 func main() {
-	cfgDirectory, err := common.CfgDirectory()
+	cfgDirectory, err := appkit.CfgDirectory()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +63,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	socketURI := fmt.Sprintf("unix://%s", filepath.Join(cfgDirectory, "deskconn.sock"))
+	socketURI := appkit.SocketURI(cfgDirectory)
 	for {
 		if err := serve(ctx, app, socketURI); err != nil {
 			log.WithError(err).Warn("not connected to deskconnd, retrying")
@@ -80,7 +79,7 @@ func main() {
 // serve registers app's procedures on deskconnd's local socket and returns once that
 // connection ends or ctx is done.
 func serve(ctx context.Context, app *remotecontrol.RemoteControl, socketURI string) error {
-	session, err := xconn.ConnectAnonymous(ctx, socketURI, common.LocalRealm)
+	session, err := xconn.ConnectAnonymous(ctx, socketURI, appkit.LocalRealm)
 	if err != nil {
 		return err
 	}

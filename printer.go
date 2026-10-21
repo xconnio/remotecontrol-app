@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/phin1x/go-ipp"
-
-	"github.com/xconnio/deskconn/common"
 )
 
 type Printer struct {
 	cups         *printerCUPSClient
 	retryDelay   time.Duration
-	printingMode func() (common.PrintMode, error)
+	printingMode func() (PrintMode, error)
 }
 
 func NewPrinter() *Printer {
@@ -33,7 +31,7 @@ func (p *Printer) listPrinters(ctx context.Context, _ []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode != common.PrintModeHost {
+	if mode != PrintModeHost {
 		return nil, errors.New("printer hosting disabled; run `desk print enable --host-printers` to enable")
 	}
 
@@ -56,7 +54,7 @@ func (p *Printer) print(ctx context.Context, req []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode == common.PrintModeDisabled {
+	if mode == PrintModeDisabled {
 		return nil, errors.New("printing disabled; run `desk print enable` to enable")
 	}
 
@@ -78,7 +76,7 @@ func (p *Printer) print(ctx context.Context, req []byte) (any, error) {
 	return jobID, nil
 }
 
-func (p *Printer) currentPrintMode() (common.PrintMode, error) {
+func (p *Printer) currentPrintMode() (PrintMode, error) {
 	if p.printingMode != nil {
 		return p.printingMode()
 	}
